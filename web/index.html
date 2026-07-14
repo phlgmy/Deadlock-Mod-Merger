@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Deadlock Mod Merger</title>
+    <style>
+      :root {
+        --bg: #1e1e2e;
+        --surface: #313244;
+        --overlay: #45475a;
+        --text: #cdd6f4;
+        --dim: #a6adc8;
+        --pink: #f5c2e7;
+        --green: #a6e3a1;
+        --yellow: #f9e2af;
+        --red: #f38ba8;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        padding: 2.5rem 1.5rem;
+        background: var(--bg);
+        color: var(--text);
+        font: 15px/1.55 system-ui, -apple-system, Segoe UI, sans-serif;
+        display: flex;
+        justify-content: center;
+      }
+      main { width: 100%; max-width: 620px; }
+      h1 { font-size: 1.4rem; margin: 0 0 0.25rem; }
+      .sub { color: var(--dim); margin: 0 0 1.75rem; font-size: 0.9rem; }
+      .card {
+        background: var(--surface);
+        border-radius: 10px;
+        padding: 1.1rem 1.25rem;
+        margin-bottom: 1rem;
+      }
+      .row { display: flex; justify-content: space-between; gap: 1rem; padding: 0.3rem 0; }
+      .row + .row { border-top: 1px solid var(--overlay); }
+      .row .k { color: var(--dim); }
+      .row .v { font-variant-numeric: tabular-nums; text-align: right; }
+      .packs { margin-top: 0.75rem; max-height: 230px; overflow-y: auto; }
+      .pack {
+        display: flex;
+        justify-content: space-between;
+        font-size: 0.85rem;
+        color: var(--dim);
+        padding: 0.2rem 0;
+        font-variant-numeric: tabular-nums;
+      }
+      label { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+      input[type="number"] {
+        width: 7rem;
+        background: var(--bg);
+        border: 1px solid var(--overlay);
+        color: var(--text);
+        border-radius: 6px;
+        padding: 0.4rem 0.6rem;
+        font: inherit;
+        text-align: right;
+      }
+      button {
+        width: 100%;
+        padding: 0.75rem;
+        border: 0;
+        border-radius: 8px;
+        background: var(--pink);
+        color: #11111b;
+        font: 600 15px system-ui, sans-serif;
+        cursor: pointer;
+      }
+      button:disabled { opacity: 0.5; cursor: default; }
+      progress {
+        width: 100%;
+        height: 8px;
+        appearance: none;
+        border: 0;
+        border-radius: 99px;
+        background: var(--overlay);
+      }
+      progress::-webkit-progress-bar { background: var(--overlay); border-radius: 99px; }
+      progress::-webkit-progress-value { background: var(--pink); border-radius: 99px; }
+      progress::-moz-progress-bar { background: var(--pink); border-radius: 99px; }
+      .note { font-size: 0.85rem; color: var(--dim); }
+      .good { color: var(--green); }
+      .warn { color: var(--yellow); }
+      .bad { color: var(--red); }
+      code {
+        background: var(--bg);
+        padding: 0.1rem 0.35rem;
+        border-radius: 4px;
+        font-size: 0.85em;
+        word-break: break-all;
+      }
+      .hidden { display: none; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Deadlock Mod Merger</h1>
+      <p class="sub">
+        Merges the active profile's mods into a few VPKs, as a new
+        <strong>“&nbsp;+&nbsp;”</strong> profile. The original is never touched.
+      </p>
+
+      <div id="error" class="card hidden"><div class="bad" id="error-text"></div></div>
+
+      <section id="plan" class="hidden">
+        <div class="card">
+          <div class="row"><span class="k">Source profile</span><span class="v" id="src"></span></div>
+          <div class="row"><span class="k">Mods</span><span class="v" id="mods"></span></div>
+          <div class="row"><span class="k">Source VPKs</span><span class="v" id="vpks"></span></div>
+          <div class="row"><span class="k">New profile</span><span class="v" id="dst"></span></div>
+        </div>
+
+        <div class="card">
+          <label>
+            <span>Max size per pack (MiB)</span>
+            <input id="cap" type="number" min="1" max="3800" step="50" value="500" />
+          </label>
+        </div>
+
+        <div class="card">
+          <div class="row" style="border: 0; padding-bottom: 0.5rem">
+            <span class="k">Packs</span><span class="v" id="packcount"></span>
+          </div>
+          <div class="packs" id="packs"></div>
+          <p class="note" style="margin: 0.75rem 0 0">
+            Mods that override each other are kept in separate packs, in their original
+            order, so the game resolves those conflicts exactly as it does now. Nothing
+            is dropped.
+          </p>
+        </div>
+
+        <button id="go">Merge</button>
+      </section>
+
+      <section id="busy" class="card hidden">
+        <div class="row" style="border: 0"><span class="k" id="busy-text">Working…</span></div>
+        <progress id="bar" max="100" value="0"></progress>
+      </section>
+
+      <section id="done" class="card hidden">
+        <div class="good" style="font-weight: 600; margin-bottom: 0.5rem" id="done-title"></div>
+        <div class="note" id="done-body"></div>
+      </section>
+    </main>
+    <script src="app.js"></script>
+  </body>
+</html>
