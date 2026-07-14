@@ -4,7 +4,7 @@
   "description": "Merge a Deadlock Mod Manager profile's mods into a few VPKs, without breaking load order.",
   "type": "module",
   "bin": { "deadlock-mod-merger": "src/server.js" },
-  "scripts": { "start": "node src/server.js" },
+  "scripts": { "start": "node src/server.js", "build": "node scripts/build.js" },
   "engines": { "node": ">=20" },
   "license": "GPL-3.0-only",
   "repository": {

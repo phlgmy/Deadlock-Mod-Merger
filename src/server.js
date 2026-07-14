@@ -120,16 +120,28 @@ function openBrowser(url) {
     process.platform === "darwin" ? "open" : process.platform === "win32" ? "start" : "xdg-open";
   const args = process.platform === "win32" ? ["", url] : [url];
   try {
-    spawn(cmd, args, { detached: true, stdio: "ignore", shell: process.platform === "win32" }).unref();
+    const child = spawn(cmd, args, {
+      detached: true,
+      stdio: "ignore",
+      shell: process.platform === "win32",
+    });
+    child.on("error", () => {}); // spawn failures arrive async; the URL is printed anyway
+    child.unref();
   } catch {
     /* the URL is printed anyway */
   }
 }
 
 const port = Number(process.env.PORT) || 4173;
-server.listen(port, "127.0.0.1", () => {
-  const url = `http://127.0.0.1:${port}`;
+server.on("error", (err) => {
+  if (err.code !== "EADDRINUSE") throw err;
+  console.log(`Port ${port} is in use (another instance?) — picking a free one.`);
+  server.listen(0, "127.0.0.1");
+});
+server.on("listening", () => {
+  const url = `http://127.0.0.1:${server.address().port}`;
   console.log(`Deadlock Mod Merger  ->  ${url}`);
   console.log("Close DMM before merging, then press Ctrl+C here when you are done.");
   openBrowser(url);
 });
+server.listen(port, "127.0.0.1");

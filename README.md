@@ -12,16 +12,25 @@ Runs locally in your browser. No dependencies, nothing uploaded anywhere.
 
 ## Use it
 
+Download the binary for your platform from the
+[latest release](https://github.com/phlgmy/Deadlock-Mod-Merger/releases/latest) and run it —
+nothing to install.
+
+- **Windows**: run `deadlock-mod-merger-windows-x64.exe`. SmartScreen may warn because the
+  binary is unsigned; choose *More info → Run anyway*.
+- **macOS / Linux**: `chmod +x` the file first. On macOS, Gatekeeper blocks unsigned
+  downloads — right-click → *Open* the first time.
+
+Or run from source with [Node](https://nodejs.org) 20 or newer:
+
 ```sh
 git clone https://github.com/phlgmy/Deadlock-Mod-Merger
 cd Deadlock-Mod-Merger
 node src/server.js
 ```
 
-Your browser opens at `http://127.0.0.1:4173`. Pick a size cap, hit **Merge**, then open DMM
-and switch to the new `<name> +` profile.
-
-Needs [Node](https://nodejs.org) 20 or newer. Works on Linux, macOS and Windows.
+Either way your browser opens at `http://127.0.0.1:4173`. Pick a size cap, hit **Merge**,
+then open DMM and switch to the new `<name> +` profile.
 
 **Close DMM before merging.** Its store drops writes until it has read `state.json`, so if it
 is open while the new profile is written, it overwrites it on exit and the merge is lost with
@@ -61,6 +70,16 @@ one copy". Don't model it — preserve it.
 
 `state.json` is backed up beside itself before it is touched. The source profile's entry,
 folder and VPKs are never modified.
+
+## Building the binaries
+
+Releases are built automatically when a `v*` tag is pushed. To build locally you need
+[Deno](https://deno.com) 2:
+
+```sh
+npm run build           # all platforms, into dist/
+npm run build windows   # just one
+```
 
 ## Caveats
 
