@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Main window: invoke commands and listen for merge progress events.",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

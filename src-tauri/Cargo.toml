@@ -1,0 +1,31 @@
+[package]
+name = "deadlock-mod-merger"
+version = "2.0.0"
+description = "Merge a Deadlock Mod Manager profile's mods into a few VPKs, without breaking load order."
+license = "GPL-3.0-only"
+repository = "https://github.com/phlgmy/Deadlock-Mod-Merger"
+edition = "2021"
+
+[lib]
+name = "deadlock_mod_merger"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+# preserve_order + arbitrary_precision: state.json must round-trip with DMM's own
+# key order and number formatting intact, or DMM rewrites the whole file on save.
+serde_json = { version = "1", features = ["preserve_order", "arbitrary_precision"] }
+crc32fast = "1"
+md-5 = "0.10"
+sha1 = "0.10"
+uuid = { version = "1", features = ["v4"] }
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+dirs = "6"
+
+[profile.release]
+lto = true
+strip = true

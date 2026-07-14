@@ -1,6 +1,6 @@
 # Deadlock Mod Merger
 
-Merges the mods in your active [Deadlock Mod Manager](https://deadlockmods.app) profile into
+Merges the mods in a [Deadlock Mod Manager](https://deadlockmods.app) profile into
 a handful of VPKs, and registers the result as a new profile — **without changing what your
 game loads.**
 
@@ -8,37 +8,34 @@ Source 2 mounts every `pakNN_dir.vpk` in the addons folder separately, so a hund
 means a hundred archives. This collapses them into a dozen or so. The original profile is
 left completely untouched, so you can switch back whenever you like.
 
-Runs locally in your browser. No dependencies, nothing uploaded anywhere.
+A small native app (Rust + Tauri), themed to match DMM. Nothing is uploaded anywhere.
 
 ## Use it
 
-Download the binary for your platform from the
-[latest release](https://github.com/phlgmy/Deadlock-Mod-Merger/releases/latest) and run it —
-nothing to install.
+Download from the [latest release](https://github.com/phlgmy/Deadlock-Mod-Merger/releases/latest)
+and run it:
 
-- **Windows**: run `deadlock-mod-merger-windows-x64.exe`. SmartScreen may warn because the
-  binary is unsigned; choose *More info → Run anyway*.
-- **macOS / Linux**: `chmod +x` the file first. On macOS, Gatekeeper blocks unsigned
-  downloads — right-click → *Open* the first time.
+- **Windows**: `deadlock-mod-merger-windows-x64.exe` — a portable exe, nothing to install.
+  SmartScreen may warn because it is unsigned; choose *More info → Run anyway*.
+- **Linux**: `deadlock-mod-merger-linux-x64.AppImage` — `chmod +x` it first.
 
-Or run from source with [Node](https://nodejs.org) 20 or newer:
-
-```sh
-git clone https://github.com/phlgmy/Deadlock-Mod-Merger
-cd Deadlock-Mod-Merger
-node src/server.js
-```
-
-Either way your browser opens at `http://127.0.0.1:4173`. Pick a size cap, hit **Merge**,
-then open DMM and switch to the new `<name> +` profile.
+Pick a profile, pick a size cap, hit **Merge**, then open DMM and switch to the new
+`<name> +` profile.
 
 **Close DMM before merging.** Its store drops writes until it has read `state.json`, so if it
 is open while the new profile is written, it overwrites it on exit and the merge is lost with
 no error.
 
+### Updating a merged profile
+
+Mods update, profiles change. Select a previously merged profile in the dropdown and the
+button becomes **Update**: the tool re-merges from the original source profile and replaces
+the merged profile's packs in place. Adjust your mod set in the *source* profile, then
+update — the merged profile is a build artifact, not something you edit.
+
 ## What gets merged
 
-Every mod enabled in the active profile *and* in that profile's `.dmm.json`, taking only the
+Every mod enabled in the selected profile *and* in that profile's `.dmm.json`, taking only the
 manifest's `currentVpks` — DMM's record of the files it actually deployed. A mod with several
 variants therefore contributes only the one you selected, with no variant-guessing here.
 
@@ -57,34 +54,50 @@ The tempting optimisation — deduplicate across mods and keep one winner per fi
 work, in either direction.** `Unstoppable` sits at pak01 precisely to *beat* later mods and
 stop them overwriting vanilla files. QOL Lock's announcer pack sits at pak10 precisely to
 *beat* QOL Lock at pak02–09. Keep the lowest and you delete the announcer pack; keep the
-highest and you delete Unstoppable's protection, QOL Lock, and Catlock's icons. There is no
-single rule that satisfies both, because the engine's behaviour is richer than "always keep
-one copy". Don't model it — preserve it.
+highest and you delete Unstoppable's protection. There is no single rule that satisfies both,
+because the engine's behaviour is richer than "always keep one copy". Don't model it —
+preserve it.
 
 ## What it writes
 
 - `citadel/addons/profile_<id>_<name>/pak01_dir.vpk …` — the packs
 - `.dmm.json` in that folder, so DMM knows which VPK belongs to which pack, and in what order
+- `.dmm-merger.json` in that folder — this tool's own record of which profile the merge came
+  from, which is what makes **Update** possible
 - One new profile in DMM's `state.json`, with each pack registered as its own mod so you can
   see and reorder them
 
 `state.json` is backed up beside itself before it is touched. The source profile's entry,
 folder and VPKs are never modified.
 
-## Building the binaries
+## Building from source
 
-Releases are built automatically when a `v*` tag is pushed. To build locally you need
-[Deno](https://deno.com) 2:
+Needs [Rust](https://rustup.rs) and, on Linux, the
+[Tauri system packages](https://tauri.app/start/prerequisites/) (webkit2gtk 4.1, gtk3).
 
 ```sh
-npm run build           # all platforms, into dist/
-npm run build windows   # just one
+cd src-tauri
+cargo run                # dev
+cargo build --release    # portable binary in target/release/
+npx @tauri-apps/cli build # AppImage / full bundles
+```
+
+Releases are built by CI when a `v*` tag is pushed.
+
+### Parity with the original implementation
+
+This app is a Rust port of an earlier Node implementation (tag `js-final`). The port was
+gated on a golden-diff harness that runs both against the same profile in a sandbox and
+requires byte-identical packs and equivalent state changes:
+
+```sh
+node scripts/parity.mjs <profile-id> <cap-mb>
 ```
 
 ## Caveats
 
-- A merged pack is one on/off switch. To change your mod set, go back to the original
-  profile, adjust it there, and re-merge.
+- A merged pack is one on/off switch. To change your mod set, edit the original profile and
+  hit **Update**.
 - Only self-contained VPKs are supported — which is everything DMM deploys. Multi-chunk
   archives (`pak01_000.vpk`) are reported rather than mangled.
 - A single VPK cannot exceed 4 GiB; the format's directory offsets are 32-bit.

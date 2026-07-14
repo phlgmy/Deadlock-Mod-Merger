@@ -8,14 +8,49 @@ permissions:
   contents: write
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
+  linux:
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - uses: denoland/setup-deno@v2
+      - name: Install Tauri system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev \
+            libayatana-appindicator3-dev librsvg2-dev patchelf
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
         with:
-          deno-version: v2.x
-      - run: node scripts/build.js
+          workspaces: src-tauri
+      - name: Build AppImage
+        run: npx --yes @tauri-apps/cli@latest build
+      - name: Rename artifact
+        run: |
+          mkdir out
+          cp src-tauri/target/release/bundle/appimage/*.AppImage \
+            out/deadlock-mod-merger-linux-x64.AppImage
       - uses: softprops/action-gh-release@v2
         with:
-          files: dist/*
+          files: out/*
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      # A plain cargo release build embeds the ui/ assets and produces a
+      # portable single-file exe — no installer, nothing to bundle.
+      - name: Build portable exe
+        run: cargo build --release --bin deadlock-mod-merger
+        working-directory: src-tauri
+      - name: Rename artifact
+        shell: bash
+        run: |
+          mkdir out
+          cp src-tauri/target/release/deadlock-mod-merger.exe \
+            out/deadlock-mod-merger-windows-x64.exe
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: out/*

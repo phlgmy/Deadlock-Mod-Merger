@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Deadlock Mod Merger</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <main>
+      <header>
+        <h1>Deadlock Mod Merger</h1>
+        <p class="subtitle">Collapse a profile's mods into a few packs — load order intact.</p>
+      </header>
+
+      <section class="card" id="controls">
+        <div class="field">
+          <label for="profile">Profile</label>
+          <select id="profile"></select>
+          <p class="hint" id="profile-hint"></p>
+        </div>
+        <div class="field">
+          <label for="cap">Pack size cap <span id="cap-label">500 MiB</span></label>
+          <input type="range" id="cap" min="100" max="2000" step="50" value="500" />
+        </div>
+      </section>
+
+      <section class="card hidden" id="plan">
+        <div class="stats">
+          <div class="stat"><span class="k">Mods</span><span class="v" id="mods"></span></div>
+          <div class="stat"><span class="k">VPKs</span><span class="v" id="vpks"></span></div>
+          <div class="stat"><span class="k">Total</span><span class="v" id="total"></span></div>
+          <div class="stat"><span class="k">Packs</span><span class="v" id="packcount"></span></div>
+        </div>
+        <div id="packs"></div>
+        <p class="hint" id="plan-note"></p>
+        <button id="go"></button>
+        <p class="hint warn">Close Deadlock Mod Manager before merging.</p>
+      </section>
+
+      <section class="card hidden" id="busy">
+        <p id="busy-text">Indexing…</p>
+        <progress id="bar" max="100" value="0"></progress>
+      </section>
+
+      <section class="card hidden" id="done">
+        <h2 id="done-title"></h2>
+        <p id="done-body"></p>
+        <button id="again" class="ghost">Back</button>
+      </section>
+
+      <section class="card error hidden" id="error">
+        <h2>Something went wrong</h2>
+        <p id="error-text"></p>
+        <button id="retry" class="ghost">Retry</button>
+      </section>
+    </main>
+    <script src="app.js" defer></script>
+  </body>
+</html>
