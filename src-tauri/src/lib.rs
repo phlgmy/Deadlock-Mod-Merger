@@ -2,7 +2,8 @@ pub mod merge;
 pub mod state;
 pub mod vpk;
 
-use merge::{analyze, build_packs, commit, index_sources, merged_source, Target};
+use merge::{analyze, build_packs, commit, index_sources, merged_dest, merged_source, Target};
+use state::StateDoc;
 use serde_json::{json, Value};
 use state::load_state;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -16,25 +17,43 @@ fn profiles() -> Result<Value, String> {
     merge::list_profiles()
 }
 
+/// Where a merge of `profile_id` would land.
+///
+/// - Selecting a merged profile means "update it from its source".
+/// - Selecting a source that already has a merged profile means "overwrite
+///   that one" — no piling up "Name +", "Name + +".
+/// - Otherwise a fresh profile is created.
+fn resolve(s: &StateDoc, profile_id: &str) -> (String, Option<String>) {
+    if let Some(src) = merged_source(s, profile_id) {
+        (src, Some(profile_id.to_string()))
+    } else if let Some(dst) = merged_dest(s, profile_id) {
+        (profile_id.to_string(), Some(dst))
+    } else {
+        (profile_id.to_string(), None)
+    }
+}
+
 #[tauri::command]
 fn plan(profile_id: String, max_mb: u64) -> Result<Value, String> {
     let s = load_state()?;
-    // Planning against a merged profile means "preview its update": plan from
-    // its source, but keep the merged profile's own name as the destination.
-    let source = merged_source(&s, &profile_id);
-    let ctx = analyze(&s, Some(source.as_deref().unwrap_or(&profile_id)))?;
+    let (source_pid, dest_pid) = resolve(&s, &profile_id);
+    let ctx = analyze(&s, Some(&source_pid))?;
     let index = index_sources(&ctx.sources)?;
     let packs = build_packs(&ctx.sources, &index, max_mb * 1024 * 1024);
 
-    let dest_name = if source.is_some() {
-        s.state()["profiles"][&profile_id]["name"].as_str().unwrap_or(&ctx.dest_name).to_string()
-    } else {
-        ctx.dest_name.clone()
+    let dest_name = match &dest_pid {
+        Some(pid) => {
+            s.state()["profiles"][pid]["name"].as_str().unwrap_or(&ctx.dest_name).to_string()
+        }
+        None => ctx.dest_name.clone(),
     };
     Ok(json!({
         "sourceName": ctx.source_name,
         "destName": dest_name,
-        "isUpdate": source.is_some(),
+        // Selected profile IS the merged one -> "update". Selected a source
+        // whose merged profile already exists -> "overwrite" (warn in the UI).
+        "isUpdate": profile_id != source_pid,
+        "willOverwrite": dest_pid.is_some() && profile_id == source_pid,
         "sourceDir": ctx.source_dir.display().to_string(),
         "modCount": ctx.mod_count,
         "vpkCount": ctx.sources.len(),
@@ -59,12 +78,12 @@ async fn merge_profile(
     }
     let result = tauri::async_runtime::spawn_blocking(move || {
         let mut s = load_state()?;
-        let source = merged_source(&s, &profile_id);
-        let (ctx_pid, target) = match &source {
-            Some(src) => (src.clone(), Target::Existing { profile_id: profile_id.clone() }),
-            None => (profile_id.clone(), Target::New),
+        let (source_pid, dest_pid) = resolve(&s, &profile_id);
+        let target = match &dest_pid {
+            Some(pid) => Target::Existing { profile_id: pid.clone() },
+            None => Target::New,
         };
-        let ctx = analyze(&s, Some(&ctx_pid))?;
+        let ctx = analyze(&s, Some(&source_pid))?;
         let index = index_sources(&ctx.sources)?;
         let packs = build_packs(&ctx.sources, &index, max_mb * 1024 * 1024);
 
@@ -85,7 +104,7 @@ async fn merge_profile(
             "bytes": res.sizes.iter().sum::<u64>(),
             "badCrc": res.bad_crc,
             "backup": res.backup.display().to_string(),
-            "updated": source.is_some(),
+            "updated": dest_pid.is_some(),
         }))
     })
     .await

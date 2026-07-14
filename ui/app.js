@@ -61,10 +61,17 @@ async function loadPlan() {
       )
       .join("");
 
+    $("plan-note").classList.remove("warn");
     if (data.isUpdate) {
       $("go").textContent = `Update “${data.destName}” from “${data.sourceName}”`;
       $("plan-note").textContent =
         "This is a merged profile. Updating re-merges it from its source profile, replacing its packs in place.";
+    } else if (data.willOverwrite) {
+      $("go").textContent = `Merge “${data.sourceName}” — overwrite “${data.destName}”`;
+      $("plan-note").textContent =
+        `“${data.destName}” already exists and will be overwritten with this merge. ` +
+        `“${data.sourceName}” stays untouched.`;
+      $("plan-note").classList.add("warn");
     } else {
       $("go").textContent = `Merge into new profile “${data.destName}”`;
       $("plan-note").textContent = `“${data.sourceName}” stays untouched; the merge goes into a new profile.`;

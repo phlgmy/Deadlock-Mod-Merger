@@ -254,7 +254,7 @@ fn now_iso() -> String {
     chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S.000Z").to_string()
 }
 
-fn local_mod(name: &str, vpk: &str, size: u64, order: usize, ts: &str) -> Value {
+fn local_mod(name: &str, description: &str, vpk: &str, size: u64, order: usize, ts: &str) -> Value {
     let id = {
         let uuid = uuid::Uuid::new_v4().to_string();
         let hex = Sha1::digest(uuid.as_bytes())
@@ -267,7 +267,7 @@ fn local_mod(name: &str, vpk: &str, size: u64, order: usize, ts: &str) -> Value 
         "id": id,
         "remoteId": format!("local-{}", uuid::Uuid::new_v4()),
         "name": name,
-        "description": "Merged by Deadlock Mod Merger.",
+        "description": description,
         "remoteUrl": "",
         "category": "Other/Misc",
         "author": "Deadlock Mod Merger",
@@ -410,11 +410,25 @@ pub fn commit(
         }
     }
 
+    // Each pack's description lists the mods inside it, in pak order.
     let mods: Vec<Value> = names
         .iter()
         .enumerate()
         .map(|(i, vpk)| {
-            local_mod(&format!("{dest_name} — Pack {:02}", i + 1), vpk, sizes[i], i, &ts)
+            let mut seen = HashSet::new();
+            let contents: Vec<&str> = packs[i]
+                .iter()
+                .filter(|s| seen.insert(s.name.as_str()))
+                .map(|s| s.name.as_str())
+                .collect();
+            local_mod(
+                &format!("{dest_name} — Pack {:02}", i + 1),
+                &contents.join(", "),
+                vpk,
+                sizes[i],
+                i,
+                &ts,
+            )
         })
         .collect();
 
@@ -519,6 +533,18 @@ pub fn merged_source(s: &StateDoc, profile_id: &str) -> Option<String> {
         .iter()
         .find(|(id, p)| *id != profile_id && str_of(p, "name") == source_name)
         .map(|(id, _)| id.clone())
+}
+
+/// The reverse of merged_source: the merged profile that was produced from
+/// `source_id`, if one exists. Merging that source again overwrites it rather
+/// than piling up "Name +", "Name + +", ...
+pub fn merged_dest(s: &StateDoc, source_id: &str) -> Option<String> {
+    let profiles = obj(s.state(), "profiles")?;
+    profiles
+        .keys()
+        .filter(|id| id.as_str() != source_id)
+        .find(|id| merged_source(s, id).as_deref() == Some(source_id))
+        .cloned()
 }
 
 pub fn list_profiles() -> Result<Value> {

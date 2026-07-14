@@ -4,12 +4,13 @@
 //   parity plan <profile-id> <max-mb>
 //   parity merge <profile-id> <max-mb>
 //   parity update <merged-profile-id> <max-mb>
+//   parity resolve <profile-id> <max-mb>   (max-mb ignored; read-only)
 //
 // Honors $HOME/%APPDATA% like the app does, so the harness can point it at a
 // sandbox. Not shipped to users; built only as a dev binary.
 
 use deadlock_mod_merger::merge::{
-    analyze, build_packs, commit, index_sources, merged_source, Target,
+    analyze, build_packs, commit, index_sources, merged_dest, merged_source, Target,
 };
 use deadlock_mod_merger::state::load_state;
 use serde_json::json;
@@ -26,6 +27,12 @@ fn main() {
 
     let run = || -> Result<serde_json::Value, String> {
         let mut s = load_state()?;
+        if cmd == "resolve" {
+            return Ok(json!({
+                "source": merged_source(&s, pid),
+                "dest": merged_dest(&s, pid),
+            }));
+        }
         if cmd == "update" {
             let source = merged_source(&s, pid)
                 .ok_or_else(|| format!("{pid} is not a merged profile (no source found)"))?;

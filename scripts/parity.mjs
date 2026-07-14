@@ -106,9 +106,13 @@ const sha256 = (p) => createHash("sha256").update(fs.readFileSync(p)).digest("he
 
 // Strip run-specific randomness so structural equality is what's compared:
 // UUIDs, mod_/profile_ ids, ISO timestamps, and sandbox-absolute paths.
+// Descriptions are masked too: the Rust version intentionally lists each
+// pack's contents there (a post-parity feature), where js-final wrote a
+// fixed string.
 function normalize(text, sandboxBase) {
   return text
     .replaceAll(sandboxBase, "<SANDBOX>")
+    .replace(/"description":"(?:[^"\\]|\\.)*"/g, '"description":"<DESC>"')
     .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, "<UUID>")
     .replace(/local-[0-9a-f-]{9,36}/gi, "<LOCAL-ID>")
     .replace(/mod_[0-9a-f]{26}/g, "<MOD-ID>")

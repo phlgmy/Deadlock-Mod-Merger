@@ -33,6 +33,9 @@ button becomes **Update**: the tool re-merges from the original source profile a
 the merged profile's packs in place. Adjust your mod set in the *source* profile, then
 update — the merged profile is a build artifact, not something you edit.
 
+Merging a source profile that already has a merged counterpart overwrites that counterpart
+(the plan view warns you first) — you never end up with "Name +", "Name + +", and so on.
+
 ## What gets merged
 
 Every mod enabled in the selected profile *and* in that profile's `.dmm.json`, taking only the
@@ -64,8 +67,8 @@ preserve it.
 - `.dmm.json` in that folder, so DMM knows which VPK belongs to which pack, and in what order
 - `.dmm-merger.json` in that folder — this tool's own record of which profile the merge came
   from, which is what makes **Update** possible
-- One new profile in DMM's `state.json`, with each pack registered as its own mod so you can
-  see and reorder them
+- One new profile in DMM's `state.json`, with each pack registered as its own mod — its
+  description lists the mods inside, so you can see and reorder packs from DMM
 
 `state.json` is backed up beside itself before it is touched. The source profile's entry,
 folder and VPKs are never modified.
