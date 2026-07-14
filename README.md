@@ -61,6 +61,15 @@ highest and you delete Unstoppable's protection. There is no single rule that sa
 because the engine's behaviour is richer than "always keep one copy". Don't model it —
 preserve it.
 
+Packing is first-fit with that constraint. Because mods are walked in ascending pak order,
+every conflict an incoming mod has must resolve with it mounting later — so it may join any
+pack strictly after the *last* pack that conflicts with it, and takes the earliest one with
+room under the size cap. A conflict starts a new pack but never seals the old ones, so
+non-conflicting mods keep flowing into earlier packs. The floor is set by the longest chain
+of pairwise-conflicting mods (each of those needs its own pack, in order), and the merge
+refuses to write anything if the plan would put any conflicting pair out of order — the
+invariant is re-checked at commit time.
+
 ## What it writes
 
 - `citadel/addons/profile_<id>_<name>/pak01_dir.vpk …` — the packs
@@ -87,15 +96,22 @@ npx @tauri-apps/cli build # AppImage / full bundles
 
 Releases are built by CI when a `v*` tag is pushed.
 
-### Parity with the original implementation
+### Verification
 
-This app is a Rust port of an earlier Node implementation (tag `js-final`). The port was
-gated on a golden-diff harness that runs both against the same profile in a sandbox and
-requires byte-identical packs and equivalent state changes:
+`scripts/verify.mjs` runs a real merge in a sandbox (reads your real mods, writes nowhere
+near your game) and checks the properties that matter: every pack parses, no file path is
+dropped or invented, and for every path the first- and last-mounted bytes match the original
+layout — so the engine resolves everything to the same result. The conflict-order invariant
+is additionally enforced inside the app itself on every merge.
 
 ```sh
-node scripts/parity.mjs <profile-id> <cap-mb>
+node scripts/verify.mjs <profile-id> <cap-mb>
 ```
+
+History: this app is a Rust port of an earlier Node implementation (tag `js-final`). The
+port itself was gated on byte-identical output against that implementation (see commit
+`adf90d3`); the packing algorithm has since been improved, so byte parity no longer holds by
+design and the property checks above replace it.
 
 ## Caveats
 

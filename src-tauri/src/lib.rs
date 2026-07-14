@@ -61,8 +61,6 @@ fn plan(profile_id: String, max_mb: u64) -> Result<Value, String> {
         "packs": packs.iter().map(|p| json!({
             "mods": p.len(),
             "bytes": p.iter().map(|x| x.size).sum::<u64>(),
-            "from": p[0].pak,
-            "to": p[p.len() - 1].pak,
         })).collect::<Vec<_>>(),
     }))
 }

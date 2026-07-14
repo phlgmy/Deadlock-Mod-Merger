@@ -199,31 +199,68 @@ fn conflicts(a: &Source, b: &Source, index: &SourceIndex) -> bool {
     small.iter().any(|(p, crc)| big.get(p).is_some_and(|other| other != crc))
 }
 
+// Placement is first-fit with an order constraint. Sources are walked in
+// ascending pak order, so every already-placed mod has a lower pak than the
+// incoming one — meaning every conflict the incoming mod has must resolve
+// with it mounting LATER. It may therefore only join a pack strictly after
+// the last pack that conflicts with it; within that legal range, the first
+// pack with room wins. Unlike sealing packs at the first clash, a conflict
+// no longer ends a pack forever — later mods flow back into earlier packs.
 pub fn build_packs<'a>(
     sources: &'a [Source],
     index: &SourceIndex,
     max_bytes: u64,
 ) -> Vec<Vec<&'a Source>> {
     let mut packs: Vec<Vec<&Source>> = Vec::new();
-    let mut current: Vec<&Source> = Vec::new();
-    let mut size = 0u64;
+    let mut sizes: Vec<u64> = Vec::new();
     for src in sources {
-        if current.is_empty() && src.size > max_bytes {
-            packs.push(vec![src]); // oversized loner gets a pack to itself
-            continue;
+        let earliest = packs
+            .iter()
+            .rposition(|pack| pack.iter().any(|other| conflicts(src, other, index)))
+            .map_or(0, |i| i + 1);
+        match (earliest..packs.len()).find(|&i| sizes[i] + src.size <= max_bytes) {
+            Some(i) => {
+                packs[i].push(src);
+                sizes[i] += src.size;
+            }
+            None => {
+                // No pack has room (or none is legal): open a new one. An
+                // oversized loner exceeds the cap alone; nothing else will
+                // ever fit with it, so it stays a pack of one.
+                packs.push(vec![src]);
+                sizes.push(src.size);
+            }
         }
-        let clash = current.iter().any(|other| conflicts(src, other, index));
-        if !current.is_empty() && (clash || size + src.size > max_bytes) {
-            packs.push(std::mem::take(&mut current));
-            size = 0;
-        }
-        current.push(src);
-        size += src.size;
-    }
-    if !current.is_empty() {
-        packs.push(current);
     }
     packs
+}
+
+/// The invariant the packing must preserve, checked directly: every pair of
+/// conflicting mods lands with the lower pak in a strictly earlier pack, so
+/// the engine still resolves every conflict in its original orientation.
+/// Runs before anything is written; cheap insurance against packing bugs.
+pub fn verify_pack_order(packs: &[Vec<&Source>], index: &SourceIndex) -> Result<()> {
+    let placed: Vec<(usize, &Source)> = packs
+        .iter()
+        .enumerate()
+        .flat_map(|(i, p)| p.iter().map(move |s| (i, *s)))
+        .collect();
+    for (x, &(pack_a, a)) in placed.iter().enumerate() {
+        for &(pack_b, b) in &placed[x + 1..] {
+            if !conflicts(a, b, index) {
+                continue;
+            }
+            let ((lo_pack, lo), (hi_pack, hi)) =
+                if a.pak < b.pak { ((pack_a, a), (pack_b, b)) } else { ((pack_b, b), (pack_a, a)) };
+            if lo_pack >= hi_pack {
+                return Err(format!(
+                    "packing bug: conflicting mods out of order — \"{}\" (pak{:02}, pack {}) must mount before \"{}\" (pak{:02}, pack {}). Nothing was written.",
+                    lo.name, lo.pak, lo_pack + 1, hi.name, hi.pak, hi_pack + 1,
+                ));
+            }
+        }
+    }
+    Ok(())
 }
 
 // Members of a pack never conflict, so a repeated path is byte-identical and
@@ -328,6 +365,8 @@ pub fn commit(
     target: Target,
     mut on_progress: impl FnMut(Value),
 ) -> Result<CommitResult> {
+    let index = index_sources(&ctx.sources)?;
+    verify_pack_order(packs, &index)?;
     let ts = now_iso();
 
     // Resolve the destination profile id, folder and name.
@@ -545,6 +584,102 @@ pub fn merged_dest(s: &StateDoc, source_id: &str) -> Option<String> {
         .filter(|id| id.as_str() != source_id)
         .find(|id| merged_source(s, id).as_deref() == Some(source_id))
         .cloned()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn src(pak: u64, size: u64) -> Source {
+        Source {
+            name: format!("m{pak}"),
+            vpk: format!("pak{pak:02}_dir.vpk"),
+            path: PathBuf::from(format!("/x/pak{pak:02}")),
+            pak,
+            size,
+        }
+    }
+
+    fn index_of(entries: &[(u64, &[(&str, u32)])]) -> SourceIndex {
+        entries
+            .iter()
+            .map(|(pak, files)| {
+                (*pak, files.iter().map(|(p, crc)| (p.to_string(), *crc)).collect())
+            })
+            .collect()
+    }
+
+    /// A conflict starts a new pack but does not seal the old one: mods after
+    /// the conflict flow back into the earliest legal pack.
+    #[test]
+    fn backfills_after_conflict() {
+        let sources = vec![src(1, 10), src(2, 10), src(3, 10)];
+        // pak1 and pak2 conflict on "x"; pak3 conflicts with nothing.
+        let index = index_of(&[
+            (1, &[("x", 111)]),
+            (2, &[("x", 222)]),
+            (3, &[("y", 333)]),
+        ]);
+        let packs = build_packs(&sources, &index, 1000);
+        assert_eq!(packs.len(), 2);
+        let paks: Vec<Vec<u64>> =
+            packs.iter().map(|p| p.iter().map(|s| s.pak).collect()).collect();
+        assert_eq!(paks, vec![vec![1, 3], vec![2]]); // 3 rejoined pack 1
+        verify_pack_order(&packs, &index).unwrap();
+    }
+
+    /// The transitive trap: pak3 conflicts with pak2 but not pak1, so it may
+    /// NOT go back into pack 1 — that would mount it before pak2.
+    #[test]
+    fn no_backfill_past_a_conflict() {
+        let sources = vec![src(1, 10), src(2, 10), src(3, 10)];
+        let index = index_of(&[
+            (1, &[("a", 1)]),
+            (2, &[("a", 2), ("b", 1)]),
+            (3, &[("b", 2)]),
+        ]);
+        let packs = build_packs(&sources, &index, 1000);
+        let paks: Vec<Vec<u64>> =
+            packs.iter().map(|p| p.iter().map(|s| s.pak).collect()).collect();
+        assert_eq!(paks, vec![vec![1], vec![2], vec![3]]);
+        verify_pack_order(&packs, &index).unwrap();
+    }
+
+    /// Identical bytes are not a conflict; the size cap still splits.
+    #[test]
+    fn size_cap_and_identical_files() {
+        let sources = vec![src(1, 60), src(2, 60), src(3, 30)];
+        let index = index_of(&[
+            (1, &[("a", 7)]),
+            (2, &[("a", 7)]), // same crc: not a conflict
+            (3, &[("c", 3)]),
+        ]);
+        let packs = build_packs(&sources, &index, 100);
+        let paks: Vec<Vec<u64>> =
+            packs.iter().map(|p| p.iter().map(|s| s.pak).collect()).collect();
+        assert_eq!(paks, vec![vec![1, 3], vec![2]]); // split by size, 3 backfills
+        verify_pack_order(&packs, &index).unwrap();
+    }
+
+    /// The checker rejects a conflicting pair in the wrong pack order…
+    #[test]
+    fn verify_rejects_inverted_order() {
+        let a = src(1, 10);
+        let b = src(2, 10);
+        let index = index_of(&[(1, &[("x", 1)]), (2, &[("x", 2)])]);
+        let packs: Vec<Vec<&Source>> = vec![vec![&b], vec![&a]];
+        assert!(verify_pack_order(&packs, &index).is_err());
+    }
+
+    /// …and a conflicting pair sharing one pack.
+    #[test]
+    fn verify_rejects_conflict_in_same_pack() {
+        let a = src(1, 10);
+        let b = src(2, 10);
+        let index = index_of(&[(1, &[("x", 1)]), (2, &[("x", 2)])]);
+        let packs: Vec<Vec<&Source>> = vec![vec![&a, &b]];
+        assert!(verify_pack_order(&packs, &index).is_err());
+    }
 }
 
 pub fn list_profiles() -> Result<Value> {

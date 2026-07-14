@@ -5,6 +5,7 @@
 //   parity merge <profile-id> <max-mb>
 //   parity update <merged-profile-id> <max-mb>
 //   parity resolve <profile-id> <max-mb>   (max-mb ignored; read-only)
+//   parity list <vpk-path> 0               (dump a VPK's directory as JSON)
 //
 // Honors $HOME/%APPDATA% like the app does, so the harness can point it at a
 // sandbox. Not shipped to users; built only as a dev binary.
@@ -26,6 +27,13 @@ fn main() {
     };
 
     let run = || -> Result<serde_json::Value, String> {
+        if cmd == "list" {
+            let entries = deadlock_mod_merger::vpk::read_dir(std::path::Path::new(pid))?;
+            return Ok(json!(entries
+                .iter()
+                .map(|e| json!({ "path": e.path, "crc": e.crc, "size": e.size }))
+                .collect::<Vec<_>>()));
+        }
         let mut s = load_state()?;
         if cmd == "resolve" {
             return Ok(json!({
@@ -65,11 +73,11 @@ fn main() {
                 "modCount": ctx.mod_count,
                 "vpkCount": ctx.sources.len(),
                 "totalBytes": ctx.total_bytes,
+                "sources": ctx.sources.iter().map(|s| s.path.display().to_string()).collect::<Vec<_>>(),
                 "packs": packs.iter().map(|p| json!({
                     "mods": p.len(),
                     "bytes": p.iter().map(|x| x.size).sum::<u64>(),
-                    "from": p[0].pak,
-                    "to": p[p.len() - 1].pak,
+                    "paks": p.iter().map(|x| x.pak).collect::<Vec<_>>(),
                 })).collect::<Vec<_>>(),
             }));
         }
