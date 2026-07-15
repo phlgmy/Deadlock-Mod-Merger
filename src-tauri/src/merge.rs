@@ -1,5 +1,5 @@
-// Reading Deadlock Mod Manager's state, packing its mods, and writing the result
-// back as a new (or updated) profile.
+// Reading Deadlock Mod Manager's state, packing its mods, and writing the
+// result back as a new (or updated) profile.
 
 use crate::state::{load_state, StateDoc};
 use crate::vpk::{read_dir, write_vpk, FileRef};
@@ -11,13 +11,11 @@ use std::path::{Path, PathBuf};
 pub type Result<T> = std::result::Result<T, String>;
 
 // The merger's own metadata, beside DMM's .dmm.json but in a separate file so
-// DMM never has to parse an unknown key. This is what links a merged profile
-// back to the profile it was merged from.
+// DMM never parses an unknown key. Links a merged profile back to its source.
 const MERGER_MANIFEST: &str = ".dmm-merger.json";
 
 pub struct Source {
     pub name: String,
-    pub vpk: String,
     pub path: PathBuf,
     pub pak: u64,
     pub size: u64,
@@ -52,14 +50,10 @@ fn str_of(v: &Value, key: &str) -> String {
     v.get(key).and_then(|x| x.as_str()).unwrap_or_default().to_string()
 }
 
-// ---------------------------------------------------------------------------
-// What to merge
-// ---------------------------------------------------------------------------
-
-// A mod counts if it is enabled in the profile AND in that profile's .dmm.json,
-// and we take only the manifest's currentVpks — DMM's record of the files it
-// actually deployed. That means a mod with several variants contributes only the
-// one you selected, with no variant logic here at all.
+// A mod counts if it is enabled in the profile AND in that profile's
+// .dmm.json, taking only the manifest's currentVpks (DMM's record of what it
+// actually deployed), so a multi-variant mod contributes only the variant you
+// selected.
 pub fn analyze(s: &StateDoc, profile_id: Option<&str>) -> Result<Analysis> {
     let state = s.state();
     let game = str_of(state, "gamePath");
@@ -97,9 +91,7 @@ pub fn analyze(s: &StateDoc, profile_id: Option<&str>) -> Result<Analysis> {
     let names: HashMap<String, String> = profile
         .get("mods")
         .and_then(|v| v.as_array())
-        .map(|mods| {
-            mods.iter().map(|m| (str_of(m, "remoteId"), str_of(m, "name"))).collect()
-        })
+        .map(|mods| mods.iter().map(|m| (str_of(m, "remoteId"), str_of(m, "name"))).collect())
         .unwrap_or_default();
 
     let mut enabled: Vec<String> = profile
@@ -122,8 +114,7 @@ pub fn analyze(s: &StateDoc, profile_id: Option<&str>) -> Result<Analysis> {
         if !entry.get("enabled").and_then(|v| v.as_bool()).unwrap_or(false) {
             continue;
         }
-        let vpks = entry.get("currentVpks").and_then(|v| v.as_array());
-        for vpk in vpks.into_iter().flatten() {
+        for vpk in entry.get("currentVpks").and_then(|v| v.as_array()).into_iter().flatten() {
             let Some(vpk) = vpk.as_str() else { continue };
             let Some(pak) = pak_number(vpk) else { continue };
             let full = source_dir.join(vpk);
@@ -134,7 +125,6 @@ pub fn analyze(s: &StateDoc, profile_id: Option<&str>) -> Result<Analysis> {
             let size = std::fs::metadata(&full).map_err(|e| format!("{}: {e}", full.display()))?.len();
             sources.push(Source {
                 name: names.get(rid).cloned().unwrap_or_else(|| rid.clone()),
-                vpk: vpk.to_string(),
                 path: full,
                 pak,
                 size,
@@ -162,23 +152,14 @@ pub fn analyze(s: &StateDoc, profile_id: Option<&str>) -> Result<Analysis> {
 }
 
 // ---------------------------------------------------------------------------
-// Packing
+// Packing.
 //
-// THE ONE RULE: never decide a conflict ourselves.
-//
-// Two mods conflict when they ship the same internal path with different bytes.
-// The engine resolves those at mount time by pak order — and we do not need to
-// know its exact rule, so long as two conflicting mods never land in the same
-// output VPK. So: walk the sources in ascending pak order and start a new pack
-// whenever the next one conflicts with anything already in the current pack (or
-// would bust the size cap). Packs are written pak01, pak02, ... in that same
-// order, so every conflicting pair keeps its original relative position and the
-// game reaches exactly the result it reaches today.
-//
-// Do not "optimise" this by deduplicating across mods and keeping one winner per
-// path. There is no rule that works: Unstoppable (pak01) is built to beat later
-// mods, while QOL Lock's announcer pack (pak10) is built to beat QOL Lock
-// (pak02-09). Either direction silently deletes somebody's mod.
+// THE ONE RULE: never decide a conflict. Two mods conflict when they ship the
+// same internal path with different bytes; the engine resolves that by pak
+// order at mount time. As long as conflicting mods never share a pack and the
+// lower pak lands in the earlier pack, the game reaches exactly the result it
+// reaches unmerged. Do NOT "optimise" by keeping one winner per path; there is
+// no rule that works in both directions (see README).
 // ---------------------------------------------------------------------------
 
 pub type SourceIndex = HashMap<u64, HashMap<String, u32>>;
@@ -199,13 +180,12 @@ fn conflicts(a: &Source, b: &Source, index: &SourceIndex) -> bool {
     small.iter().any(|(p, crc)| big.get(p).is_some_and(|other| other != crc))
 }
 
-// Placement is first-fit with an order constraint. Sources are walked in
-// ascending pak order, so every already-placed mod has a lower pak than the
-// incoming one — meaning every conflict the incoming mod has must resolve
-// with it mounting LATER. It may therefore only join a pack strictly after
-// the last pack that conflicts with it; within that legal range, the first
-// pack with room wins. Unlike sealing packs at the first clash, a conflict
-// no longer ends a pack forever — later mods flow back into earlier packs.
+// First-fit under the order constraint. Sources are walked in ascending pak
+// order, so every conflict an incoming mod has must resolve with it mounting
+// later: it may only join a pack strictly after the LAST pack that conflicts
+// with it (a pack merely free of direct conflicts is not enough), and takes
+// the earliest legal one with room. A conflict opens a new pack but never
+// seals the old ones. An oversized loner gets a pack of its own.
 pub fn build_packs<'a>(
     sources: &'a [Source],
     index: &SourceIndex,
@@ -224,9 +204,6 @@ pub fn build_packs<'a>(
                 sizes[i] += src.size;
             }
             None => {
-                // No pack has room (or none is legal): open a new one. An
-                // oversized loner exceeds the cap alone; nothing else will
-                // ever fit with it, so it stays a pack of one.
                 packs.push(vec![src]);
                 sizes.push(src.size);
             }
@@ -235,10 +212,8 @@ pub fn build_packs<'a>(
     packs
 }
 
-/// The invariant the packing must preserve, checked directly: every pair of
-/// conflicting mods lands with the lower pak in a strictly earlier pack, so
-/// the engine still resolves every conflict in its original orientation.
-/// Runs before anything is written; cheap insurance against packing bugs.
+/// Re-checks the invariant directly before anything is written: every
+/// conflicting pair lands with the lower pak in a strictly earlier pack.
 pub fn verify_pack_order(packs: &[Vec<&Source>], index: &SourceIndex) -> Result<()> {
     let placed: Vec<(usize, &Source)> = packs
         .iter()
@@ -254,7 +229,7 @@ pub fn verify_pack_order(packs: &[Vec<&Source>], index: &SourceIndex) -> Result<
                 if a.pak < b.pak { ((pack_a, a), (pack_b, b)) } else { ((pack_b, b), (pack_a, a)) };
             if lo_pack >= hi_pack {
                 return Err(format!(
-                    "packing bug: conflicting mods out of order — \"{}\" (pak{:02}, pack {}) must mount before \"{}\" (pak{:02}, pack {}). Nothing was written.",
+                    "packing bug: conflicting mods out of order; \"{}\" (pak{:02}, pack {}) must mount before \"{}\" (pak{:02}, pack {}). Nothing was written.",
                     lo.name, lo.pak, lo_pack + 1, hi.name, hi.pak, hi_pack + 1,
                 ));
             }
@@ -272,20 +247,14 @@ fn pack_entries(members: &[&Source]) -> Result<Vec<FileRef>> {
     let mut out: Vec<FileRef> = Vec::new();
     for src in sorted {
         for entry in read_dir(&src.path)? {
-            if seen.contains(&entry.path) {
-                continue;
+            if seen.insert(entry.path.clone()) {
+                out.push(FileRef { path: entry.path.clone(), entry, source: src.path.clone() });
             }
-            seen.insert(entry.path.clone());
-            out.push(FileRef { path: entry.path.clone(), entry, source: src.path.clone() });
         }
     }
     out.sort_by(|a, b| a.path.cmp(&b.path));
     Ok(out)
 }
-
-// ---------------------------------------------------------------------------
-// Writing the new profile
-// ---------------------------------------------------------------------------
 
 fn now_iso() -> String {
     chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S.000Z").to_string()
@@ -294,10 +263,8 @@ fn now_iso() -> String {
 fn local_mod(name: &str, description: &str, vpk: &str, size: u64, order: usize, ts: &str) -> Value {
     let id = {
         let uuid = uuid::Uuid::new_v4().to_string();
-        let hex = Sha1::digest(uuid.as_bytes())
-            .iter()
-            .map(|b| format!("{b:02x}"))
-            .collect::<String>();
+        let hex =
+            Sha1::digest(uuid.as_bytes()).iter().map(|b| format!("{b:02x}")).collect::<String>();
         format!("mod_{}", &hex[..26])
     };
     json!({
@@ -355,21 +322,19 @@ pub struct CommitResult {
     pub backup: PathBuf,
 }
 
-// Each pack becomes its own DMM mod, so DMM can show and reorder them — and so
-// pack N always mounts before pack N+1, which is what preserves every conflict
-// the engine has to resolve.
+// Each pack becomes its own DMM mod, so DMM can show and reorder them, and so
+// pack N always mounts before pack N+1.
 pub fn commit(
     s: &mut StateDoc,
     ctx: &Analysis,
     packs: &[Vec<&Source>],
+    index: &SourceIndex,
     target: Target,
     mut on_progress: impl FnMut(Value),
 ) -> Result<CommitResult> {
-    let index = index_sources(&ctx.sources)?;
-    verify_pack_order(packs, &index)?;
+    verify_pack_order(packs, index)?;
     let ts = now_iso();
 
-    // Resolve the destination profile id, folder and name.
     let (pid, folder, dest_name, created_at) = match &target {
         Target::New => {
             let millis = std::time::SystemTime::now()
@@ -377,15 +342,10 @@ pub fn commit(
                 .map_err(|e| e.to_string())?
                 .as_millis();
             let pid = format!("profile_{millis}_{}", &uuid::Uuid::new_v4().to_string()[..9]);
-            let slug: String = ctx
-                .dest_name
-                .to_lowercase()
-                .chars()
-                .filter(|c| c.is_ascii_alphanumeric())
-                .collect();
+            let slug: String =
+                ctx.dest_name.to_lowercase().chars().filter(|c| c.is_ascii_alphanumeric()).collect();
             let slug = if slug.is_empty() { "merged".to_string() } else { slug };
-            let folder = format!("{pid}_{slug}");
-            (pid, folder, ctx.dest_name.clone(), ts.clone())
+            (pid.clone(), format!("{pid}_{slug}"), ctx.dest_name.clone(), ts.clone())
         }
         Target::Existing { profile_id } => {
             let profile = obj(s.state(), "profiles")
@@ -402,8 +362,7 @@ pub fn commit(
     };
 
     let dest = ctx.addons.join(&folder);
-    let names: Vec<String> =
-        (1..=packs.len()).map(|i| format!("pak{i:02}_dir.vpk")).collect();
+    let names: Vec<String> = (1..=packs.len()).map(|i| format!("pak{i:02}_dir.vpk")).collect();
 
     std::fs::create_dir_all(&dest).map_err(|e| format!("{}: {e}", dest.display()))?;
 
@@ -416,8 +375,6 @@ pub fn commit(
             "phase": "writing",
             "pack": i + 1,
             "packs": packs.len(),
-            "mods": pack.len(),
-            "files": entries.len(),
             "written": written,
             "total": ctx.total_bytes,
         }));
@@ -440,10 +397,8 @@ pub fn commit(
         if let Ok(dir) = std::fs::read_dir(&dest) {
             for f in dir.flatten() {
                 let name = f.file_name().to_string_lossy().into_owned();
-                if let Some(n) = pak_number(&name) {
-                    if n as usize > packs.len() {
-                        let _ = std::fs::remove_file(f.path());
-                    }
+                if pak_number(&name).is_some_and(|n| n as usize > packs.len()) {
+                    let _ = std::fs::remove_file(f.path());
                 }
             }
         }
@@ -461,7 +416,7 @@ pub fn commit(
                 .map(|s| s.name.as_str())
                 .collect();
             local_mod(
-                &format!("{dest_name} — Pack {:02}", i + 1),
+                &format!("{dest_name} - Pack {:02}", i + 1),
                 &contents.join(", "),
                 vpk,
                 sizes[i],
@@ -493,7 +448,6 @@ pub fn commit(
     )
     .map_err(|e| format!("{}: {e}", dest.display()))?;
 
-    // Our own link back to the source profile, so "update" knows what to re-merge.
     let merger_manifest = json!({
         "version": 1,
         "sourceProfileId": ctx.source_id,
@@ -507,17 +461,15 @@ pub fn commit(
     .map_err(|e| format!("{}: {e}", dest.display()))?;
 
     // Add/replace ONE profile and nothing else. state.localMods is deliberately
-    // untouched: DMM copies it into whichever profile is *active* when you
-    // switch, so writing there would leak the merged packs into the source
-    // profile. They live in the new profile's own `mods` array, which is what
-    // DMM loads on switch.
+    // untouched: DMM copies it into whichever profile is active on switch, so
+    // writing there would leak the packs into the source profile.
     let backup = s.backup()?;
 
     let enabled_mods = Map::from_iter(mods.iter().map(|m| {
         let rid = str_of(m, "remoteId");
         (rid.clone(), json!({ "remoteId": rid, "enabled": true, "lastModified": ts }))
     }));
-    let profile_entry = json!({
+    s.state_mut()["profiles"][&pid] = json!({
         "id": pid,
         "name": dest_name,
         "isDefault": false,
@@ -528,19 +480,14 @@ pub fn commit(
         "enabledMods": enabled_mods,
         "mods": mods,
     });
-    s.state_mut()["profiles"][&pid] = profile_entry;
     s.save()?;
 
     Ok(CommitResult { dest, dest_name, names, sizes, bad_crc, backup })
 }
 
-// ---------------------------------------------------------------------------
-// Profile listing (for the UI) and merged-profile source resolution
-// ---------------------------------------------------------------------------
-
-/// If `profile` is a merged profile, return the id of the profile it was merged
-/// from. Prefers the merger manifest; falls back to matching "<source> +" by
-/// name for profiles merged before the manifest existed.
+/// The source profile a merged profile was built from. Prefers the merger
+/// manifest; falls back to matching "<source> +" by name for profiles merged
+/// before the manifest existed.
 pub fn merged_source(s: &StateDoc, profile_id: &str) -> Option<String> {
     let state = s.state();
     let profiles = obj(state, "profiles")?;
@@ -565,7 +512,6 @@ pub fn merged_source(s: &StateDoc, profile_id: &str) -> Option<String> {
         }
     }
 
-    // Legacy fallback: "Default Profile +" was merged from "Default Profile".
     let name = str_of(profile, "name");
     let source_name = name.strip_suffix(" +")?;
     profiles
@@ -574,9 +520,9 @@ pub fn merged_source(s: &StateDoc, profile_id: &str) -> Option<String> {
         .map(|(id, _)| id.clone())
 }
 
-/// The reverse of merged_source: the merged profile that was produced from
-/// `source_id`, if one exists. Merging that source again overwrites it rather
-/// than piling up "Name +", "Name + +", ...
+/// The reverse: the merged profile that was produced from `source_id`, if any.
+/// Merging that source again overwrites it rather than piling up "Name +",
+/// "Name + +", ...
 pub fn merged_dest(s: &StateDoc, source_id: &str) -> Option<String> {
     let profiles = obj(s.state(), "profiles")?;
     profiles
@@ -584,102 +530,6 @@ pub fn merged_dest(s: &StateDoc, source_id: &str) -> Option<String> {
         .filter(|id| id.as_str() != source_id)
         .find(|id| merged_source(s, id).as_deref() == Some(source_id))
         .cloned()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn src(pak: u64, size: u64) -> Source {
-        Source {
-            name: format!("m{pak}"),
-            vpk: format!("pak{pak:02}_dir.vpk"),
-            path: PathBuf::from(format!("/x/pak{pak:02}")),
-            pak,
-            size,
-        }
-    }
-
-    fn index_of(entries: &[(u64, &[(&str, u32)])]) -> SourceIndex {
-        entries
-            .iter()
-            .map(|(pak, files)| {
-                (*pak, files.iter().map(|(p, crc)| (p.to_string(), *crc)).collect())
-            })
-            .collect()
-    }
-
-    /// A conflict starts a new pack but does not seal the old one: mods after
-    /// the conflict flow back into the earliest legal pack.
-    #[test]
-    fn backfills_after_conflict() {
-        let sources = vec![src(1, 10), src(2, 10), src(3, 10)];
-        // pak1 and pak2 conflict on "x"; pak3 conflicts with nothing.
-        let index = index_of(&[
-            (1, &[("x", 111)]),
-            (2, &[("x", 222)]),
-            (3, &[("y", 333)]),
-        ]);
-        let packs = build_packs(&sources, &index, 1000);
-        assert_eq!(packs.len(), 2);
-        let paks: Vec<Vec<u64>> =
-            packs.iter().map(|p| p.iter().map(|s| s.pak).collect()).collect();
-        assert_eq!(paks, vec![vec![1, 3], vec![2]]); // 3 rejoined pack 1
-        verify_pack_order(&packs, &index).unwrap();
-    }
-
-    /// The transitive trap: pak3 conflicts with pak2 but not pak1, so it may
-    /// NOT go back into pack 1 — that would mount it before pak2.
-    #[test]
-    fn no_backfill_past_a_conflict() {
-        let sources = vec![src(1, 10), src(2, 10), src(3, 10)];
-        let index = index_of(&[
-            (1, &[("a", 1)]),
-            (2, &[("a", 2), ("b", 1)]),
-            (3, &[("b", 2)]),
-        ]);
-        let packs = build_packs(&sources, &index, 1000);
-        let paks: Vec<Vec<u64>> =
-            packs.iter().map(|p| p.iter().map(|s| s.pak).collect()).collect();
-        assert_eq!(paks, vec![vec![1], vec![2], vec![3]]);
-        verify_pack_order(&packs, &index).unwrap();
-    }
-
-    /// Identical bytes are not a conflict; the size cap still splits.
-    #[test]
-    fn size_cap_and_identical_files() {
-        let sources = vec![src(1, 60), src(2, 60), src(3, 30)];
-        let index = index_of(&[
-            (1, &[("a", 7)]),
-            (2, &[("a", 7)]), // same crc: not a conflict
-            (3, &[("c", 3)]),
-        ]);
-        let packs = build_packs(&sources, &index, 100);
-        let paks: Vec<Vec<u64>> =
-            packs.iter().map(|p| p.iter().map(|s| s.pak).collect()).collect();
-        assert_eq!(paks, vec![vec![1, 3], vec![2]]); // split by size, 3 backfills
-        verify_pack_order(&packs, &index).unwrap();
-    }
-
-    /// The checker rejects a conflicting pair in the wrong pack order…
-    #[test]
-    fn verify_rejects_inverted_order() {
-        let a = src(1, 10);
-        let b = src(2, 10);
-        let index = index_of(&[(1, &[("x", 1)]), (2, &[("x", 2)])]);
-        let packs: Vec<Vec<&Source>> = vec![vec![&b], vec![&a]];
-        assert!(verify_pack_order(&packs, &index).is_err());
-    }
-
-    /// …and a conflicting pair sharing one pack.
-    #[test]
-    fn verify_rejects_conflict_in_same_pack() {
-        let a = src(1, 10);
-        let b = src(2, 10);
-        let index = index_of(&[(1, &[("x", 1)]), (2, &[("x", 2)])]);
-        let packs: Vec<Vec<&Source>> = vec![vec![&a, &b]];
-        assert!(verify_pack_order(&packs, &index).is_err());
-    }
 }
 
 pub fn list_profiles() -> Result<Value> {
@@ -711,4 +561,83 @@ pub fn list_profiles() -> Result<Value> {
         })
         .collect();
     Ok(json!({ "activeProfileId": active, "profiles": list }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn src(pak: u64, size: u64) -> Source {
+        Source {
+            name: format!("m{pak}"),
+            path: PathBuf::from(format!("/x/pak{pak:02}")),
+            pak,
+            size,
+        }
+    }
+
+    fn index_of(entries: &[(u64, &[(&str, u32)])]) -> SourceIndex {
+        entries
+            .iter()
+            .map(|(pak, files)| {
+                (*pak, files.iter().map(|(p, crc)| (p.to_string(), *crc)).collect())
+            })
+            .collect()
+    }
+
+    fn paks(packs: &[Vec<&Source>]) -> Vec<Vec<u64>> {
+        packs.iter().map(|p| p.iter().map(|s| s.pak).collect()).collect()
+    }
+
+    /// A conflict opens a new pack but does not seal the old one.
+    #[test]
+    fn backfills_after_conflict() {
+        let sources = vec![src(1, 10), src(2, 10), src(3, 10)];
+        let index =
+            index_of(&[(1, &[("x", 111)]), (2, &[("x", 222)]), (3, &[("y", 333)])]);
+        let packs = build_packs(&sources, &index, 1000);
+        assert_eq!(paks(&packs), vec![vec![1, 3], vec![2]]);
+        verify_pack_order(&packs, &index).unwrap();
+    }
+
+    /// The transitive trap: pak3 conflicts with pak2 but not pak1, so it may
+    /// NOT go back into pack 1; that would mount it before pak2.
+    #[test]
+    fn no_backfill_past_a_conflict() {
+        let sources = vec![src(1, 10), src(2, 10), src(3, 10)];
+        let index = index_of(&[
+            (1, &[("a", 1)]),
+            (2, &[("a", 2), ("b", 1)]),
+            (3, &[("b", 2)]),
+        ]);
+        let packs = build_packs(&sources, &index, 1000);
+        assert_eq!(paks(&packs), vec![vec![1], vec![2], vec![3]]);
+        verify_pack_order(&packs, &index).unwrap();
+    }
+
+    /// Identical bytes are not a conflict; the size cap still splits.
+    #[test]
+    fn size_cap_and_identical_files() {
+        let sources = vec![src(1, 60), src(2, 60), src(3, 30)];
+        let index = index_of(&[(1, &[("a", 7)]), (2, &[("a", 7)]), (3, &[("c", 3)])]);
+        let packs = build_packs(&sources, &index, 100);
+        assert_eq!(paks(&packs), vec![vec![1, 3], vec![2]]);
+        verify_pack_order(&packs, &index).unwrap();
+    }
+
+    #[test]
+    fn verify_rejects_inverted_order() {
+        let a = src(1, 10);
+        let b = src(2, 10);
+        let index = index_of(&[(1, &[("x", 1)]), (2, &[("x", 2)])]);
+        assert!(verify_pack_order(&[vec![&b], vec![&a]], &index).is_err());
+    }
+
+    #[test]
+    fn verify_rejects_conflict_in_same_pack() {
+        let a = src(1, 10);
+        let b = src(2, 10);
+        let index = index_of(&[(1, &[("x", 1)]), (2, &[("x", 2)])]);
+        assert!(verify_pack_order(&[vec![&a, &b]], &index).is_err());
+    }
 }

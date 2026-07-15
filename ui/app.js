@@ -22,8 +22,6 @@ function fail(message) {
   show("done", false);
 }
 
-let currentPlan = null;
-
 async function loadProfiles() {
   const data = await invoke("profiles");
   const sel = $("profile");
@@ -32,7 +30,7 @@ async function loadProfiles() {
     const opt = document.createElement("option");
     opt.value = p.id;
     const tag = p.mergedFrom ? " (merged)" : "";
-    opt.textContent = `${p.name}${tag} — ${p.enabledMods} mods`;
+    opt.textContent = `${p.name}${tag} · ${p.enabledMods} mods`;
     if (p.id === data.activeProfileId) opt.selected = true;
     sel.appendChild(opt);
   }
@@ -46,8 +44,6 @@ async function loadPlan() {
 
   try {
     const data = await invoke("plan", { profileId, maxMb: cap });
-    currentPlan = data;
-
     $("mods").textContent = data.modCount;
     $("vpks").textContent = data.vpkCount;
     $("total").textContent = human(data.totalBytes);
@@ -67,7 +63,7 @@ async function loadPlan() {
       $("plan-note").textContent =
         "This is a merged profile. Updating re-merges it from its source profile, replacing its packs in place.";
     } else if (data.willOverwrite) {
-      $("go").textContent = `Merge “${data.sourceName}” — overwrite “${data.destName}”`;
+      $("go").textContent = `Merge “${data.sourceName}” (overwrites “${data.destName}”)`;
       $("plan-note").textContent =
         `“${data.destName}” already exists and will be overwritten with this merge. ` +
         `“${data.sourceName}” stays untouched.`;
@@ -77,7 +73,6 @@ async function loadPlan() {
       $("plan-note").textContent = `“${data.sourceName}” stays untouched; the merge goes into a new profile.`;
     }
 
-    $("profile-hint").textContent = "";
     show("error", false);
     show("done", false);
     show("plan");
@@ -90,7 +85,7 @@ listen("merge-progress", ({ payload: p }) => {
   const pct = p.total ? Math.round((p.written / p.total) * 100) : 0;
   $("bar").value = pct;
   $("busy-text").textContent =
-    p.phase === "writing" ? `Writing pack ${p.pack} of ${p.packs} — ${pct}%` : "Indexing…";
+    p.phase === "writing" ? `Writing pack ${p.pack} of ${p.packs} · ${pct}%` : "Indexing…";
 });
 
 $("go").onclick = async () => {
@@ -110,7 +105,7 @@ $("go").onclick = async () => {
       ? `Updated “${job.destName}”`
       : `Created “${job.destName}”`;
     const crc = job.badCrc.length
-      ? `\n\n${job.badCrc.length} file(s) failed CRC — a source VPK is already corrupt. ` +
+      ? `\n\n${job.badCrc.length} file(s) failed CRC; a source VPK is already corrupt. ` +
         `The merged copy matches what was on disk, byte for byte.`
       : "";
     const codeEl = document.createElement("code");

@@ -1,7 +1,7 @@
 [package]
 name = "deadlock-mod-merger"
 version = "2.0.0"
-description = "Merge a Deadlock Mod Manager profile's mods into a few VPKs, without breaking load order."
+description = "Pack a Deadlock Mod Manager profile's mods into a few VPKs to pass the game's 99-addon limit, without breaking load order."
 license = "GPL-3.0-only"
 repository = "https://github.com/phlgmy/Deadlock-Mod-Merger"
 edition = "2021"

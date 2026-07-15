@@ -12,10 +12,10 @@
 //     the merge before anything is written)
 //   - every written pack parses as a valid VPK
 //   - coverage: the set of file paths across all packs equals the set across
-//     all source VPKs — nothing dropped, nothing invented
+//     all source VPKs: nothing dropped, nothing invented
 //   - per-path winner: for every path, the bytes that mount LAST across the
 //     packs (highest pack) have the same CRC as the bytes that mount last
-//     across the sources (highest pak) — and the same for FIRST, so the
+//     across the sources (highest pak), and the same for FIRST, so the
 //     engine reaches the same result whichever end its rule prefers
 //   - the merged profile is registered in state.json with one mod per pack
 //
@@ -92,7 +92,7 @@ function main() {
 
   let failures = 0;
   const check = (label, ok, detail = "") => {
-    console.log(`${ok ? "  ok " : "FAIL "} ${label}${ok || !detail ? "" : ` — ${detail}`}`);
+    console.log(`${ok ? "  ok " : "FAIL "} ${label}${ok || !detail ? "" : `: ${detail}`}`);
     if (!ok) failures++;
   };
 

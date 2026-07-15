@@ -1,14 +1,12 @@
-// Headless driver for the golden-diff parity harness. Runs the same
-// analyze -> pack -> commit pipeline as the app, printing the result as JSON.
+// Headless driver for scripts/verify.mjs: runs the same analyze -> pack ->
+// commit pipeline as the app and prints JSON. Honors $HOME/%APPDATA%, so the
+// harness can point it at a sandbox. Not shipped to users.
 //
 //   parity plan <profile-id> <max-mb>
 //   parity merge <profile-id> <max-mb>
 //   parity update <merged-profile-id> <max-mb>
 //   parity resolve <profile-id> <max-mb>   (max-mb ignored; read-only)
-//   parity list <vpk-path> 0               (dump a VPK's directory as JSON)
-//
-// Honors $HOME/%APPDATA% like the app does, so the harness can point it at a
-// sandbox. Not shipped to users; built only as a dev binary.
+//   parity list <vpk-path> 0               (dump a VPK's directory)
 
 use deadlock_mod_merger::merge::{
     analyze, build_packs, commit, index_sources, merged_dest, merged_source, Target,
@@ -21,7 +19,7 @@ fn main() {
     let (cmd, pid, max_mb) = match &args[..] {
         [_, c, p, m] => (c.as_str(), p.as_str(), m.parse::<u64>().unwrap_or(500)),
         _ => {
-            eprintln!("usage: parity <plan|merge> <profile-id> <max-mb>");
+            eprintln!("usage: parity <plan|merge|update|resolve|list> <arg> <max-mb>");
             std::process::exit(2);
         }
     };
@@ -41,29 +39,16 @@ fn main() {
                 "dest": merged_dest(&s, pid),
             }));
         }
-        if cmd == "update" {
+
+        let (source_pid, target) = if cmd == "update" {
             let source = merged_source(&s, pid)
                 .ok_or_else(|| format!("{pid} is not a merged profile (no source found)"))?;
-            let ctx = analyze(&s, Some(&source))?;
-            let index = index_sources(&ctx.sources)?;
-            let packs = build_packs(&ctx.sources, &index, max_mb * 1024 * 1024);
-            let res = commit(
-                &mut s,
-                &ctx,
-                &packs,
-                Target::Existing { profile_id: pid.to_string() },
-                |_| {},
-            )?;
-            return Ok(json!({
-                "dest": res.dest.display().to_string(),
-                "destName": res.dest_name,
-                "source": source,
-                "names": res.names,
-                "sizes": res.sizes,
-                "badCrc": res.bad_crc,
-            }));
-        }
-        let ctx = analyze(&s, Some(pid))?;
+            (source, Target::Existing { profile_id: pid.to_string() })
+        } else {
+            (pid.to_string(), Target::New)
+        };
+
+        let ctx = analyze(&s, Some(&source_pid))?;
         let index = index_sources(&ctx.sources)?;
         let packs = build_packs(&ctx.sources, &index, max_mb * 1024 * 1024);
         if cmd == "plan" {
@@ -81,10 +66,11 @@ fn main() {
                 })).collect::<Vec<_>>(),
             }));
         }
-        let res = commit(&mut s, &ctx, &packs, Target::New, |_| {})?;
+        let res = commit(&mut s, &ctx, &packs, &index, target, |_| {})?;
         Ok(json!({
             "dest": res.dest.display().to_string(),
             "destName": res.dest_name,
+            "source": source_pid,
             "names": res.names,
             "sizes": res.sizes,
             "badCrc": res.bad_crc,

@@ -41,7 +41,7 @@ jobs:
         with:
           workspaces: src-tauri
       # A plain cargo release build embeds the ui/ assets and produces a
-      # portable single-file exe — no installer, nothing to bundle.
+      # portable single-file exe; no installer, nothing to bundle.
       - name: Build portable exe
         run: cargo build --release --bin deadlock-mod-merger
         working-directory: src-tauri

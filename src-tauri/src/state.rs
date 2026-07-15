@@ -1,10 +1,8 @@
-// Deadlock Mod Manager's state.json.
-//
-// It is a tauri-plugin-store file. The key "local-config" holds a JSON *string*
-// (not an object) containing {version, state} — so it gets parsed twice, and must
-// be written back the same way or DMM will not read it. serde_json is built with
-// preserve_order + arbitrary_precision so untouched parts of the document
-// round-trip byte-for-byte.
+// Deadlock Mod Manager's state.json: a tauri-plugin-store file whose
+// "local-config" key holds a JSON *string* containing {version, state}, so it
+// is parsed twice and must be written back the same way or DMM will not read
+// it. serde_json is built with preserve_order + arbitrary_precision so
+// untouched parts of the document round-trip byte-for-byte.
 
 use serde_json::Value;
 use std::path::PathBuf;
